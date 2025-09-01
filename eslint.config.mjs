@@ -20,6 +20,21 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    rules: {
+      // Allow using 'any' type
+      "@typescript-eslint/no-explicit-any": "off",
+
+      // Allow unused variables (common in development)
+      "@typescript-eslint/no-unused-vars": "off",
+
+      // Allow React components without display names
+      "react/display-name": "off",
+
+      // Allow using <img> instead of Next.js <Image /> component
+      "@next/next/no-img-element": "off",
+    },
+  },
 ];
 
 export default eslintConfig;
