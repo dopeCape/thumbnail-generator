@@ -68,28 +68,31 @@ const ThumbnailGenerator = tool({
       Logger.log(`[${sessionId}] 📋 System prompt length: ${systemPrompt.length} characters`);
       Logger.log(`[${sessionId}] 📋 User prompt length: ${userPrompt.length} characters`);
 
-      // Step 3: Prepare image URLs
+      // Step 3: Prepare ALL reference URLs for LLM analysis (but not for image generation yet)
       const referenceUrls = similarThumbnails
         .map(ref => ref.metadata?.url)
         .filter(url => url);
 
-      Logger.log(`[${sessionId}] 🖼️ Valid reference image URLs: ${referenceUrls.length}`);
+      Logger.log(`[${sessionId}] 🖼️ Valid reference image URLs for analysis: ${referenceUrls.length}`);
 
-      const allImageUrls = [...attachedImagesUrl, ...referenceUrls];
-      Logger.log(`[${sessionId}] 🖼️ Total images for LLM: ${allImageUrls.length} (${attachedImagesUrl.length} user + ${referenceUrls.length} references)`);
+      const allImageUrlsForAnalysis = [...attachedImagesUrl, ...referenceUrls];
+      Logger.log(`[${sessionId}] 🖼️ Total images for LLM analysis: ${allImageUrlsForAnalysis.length} (${attachedImagesUrl.length} user + ${referenceUrls.length} references)`);
 
-      // Step 4: Generate direction via LLM
+      // Step 4: Generate direction via LLM with reference selection
       const provider: AvaliableProvides = "openai";
       const model: AvaliableModels = "gpt-5-mini";
 
-      Logger.log(`[${sessionId}] 🤖 Calling LLM for direction generation - Provider: ${provider}, Model: ${model}`);
+      Logger.log(`[${sessionId}] 🤖 Calling LLM for direction generation and reference selection - Provider: ${provider}, Model: ${model}`);
 
+      // Updated schema to include selected reference URL (singular)
       const schema = z.object({
-        imageDirection: z.string().describe("Image Direction"),
+        imageDirection: z.string().describe("Detailed image generation direction"),
         bestUseCase: z.string().describe("Best Use Case for this thumbnail"),
+        selectedReferenceUrl: z.string().describe("URL of the single best reference thumbnail selected for image generation (from the provided references)"),
+        selectionReasoning: z.string().describe("Why this specific reference was chosen as most suitable for this request")
       });
 
-      const messages = createMessage(systemPrompt, userPrompt, allImageUrls as any);
+      const messages = createMessage(systemPrompt, userPrompt, allImageUrlsForAnalysis as any);
       const llmStart = Date.now();
 
       const response = await ls.structedResponse(messages, schema, { provider, model });
@@ -98,18 +101,25 @@ const ThumbnailGenerator = tool({
       Logger.log(`[${sessionId}] ✅ LLM direction generation completed in ${llmTime}ms`);
       Logger.log(`[${sessionId}] 🎯 Generated direction length: ${response.imageDirection.length} characters`);
       Logger.log(`[${sessionId}] 💡 Best use case: ${response.bestUseCase}`);
+      Logger.log(`[${sessionId}] 🔍 Selected reference for image generation: ${response.selectedReferenceUrl}`);
+      Logger.log(`[${sessionId}] 📝 Selection reasoning: ${response.selectionReasoning}`);
       Logger.log(`[${sessionId}] 📝 Image direction preview: ${response.imageDirection.substring(0, 200)}...`);
 
-      // Step 5: Generate thumbnail image
-      Logger.log(`[${sessionId}] 🎨 Starting image generation...`);
+      // Step 5: Generate thumbnail image using ONLY the selected reference
+      Logger.log(`[${sessionId}] 🎨 Starting image generation with selected reference...`);
+
+      // Use only user images + the single selected reference for image generation
+      const finalImageUrls = [...attachedImagesUrl, response.selectedReferenceUrl];
+
+      Logger.log(`[${sessionId}] 🖼️ Final image URLs for generation: ${finalImageUrls.length} (${attachedImagesUrl.length} user + 1 selected reference)`);
 
       const messageForImageGeneration = createImageGenerationMessage(
-        "Based on attached assets and references generate a thumbnail",
+        "Based on attached user assets and the specifically selected reference thumbnail, generate a thumbnail",
         response.imageDirection,
-        allImageUrls as any
+        finalImageUrls as any
       );
 
-      Logger.log(`[${sessionId}] 📤 Image generation message prepared with ${allImageUrls.length} images`);
+      Logger.log(`[${sessionId}] 📤 Image generation message prepared with ${finalImageUrls.length} images`);
 
       const imageGenStart = Date.now();
       const url = await imageGenerationService.generateImage(messageForImageGeneration);
@@ -125,7 +135,9 @@ const ThumbnailGenerator = tool({
       Logger.log(`[${sessionId}] 📊 Performance breakdown: Vector ${((vectorSearchTime / totalTime) * 100).toFixed(1)}%, LLM ${((llmTime / totalTime) * 100).toFixed(1)}%, Image ${((imageGenTime / totalTime) * 100).toFixed(1)}%`);
 
       return {
-        imageUrl: url
+        imageUrl: url,
+        selectedReference: response.selectedReferenceUrl,
+        selectionReasoning: response.selectionReasoning
       };
 
     } catch (error) {
